@@ -59,10 +59,4 @@ Ensure you have the dotenv package installed if you’re working outside of Vite
 
 npm install dotenv
 ```
-Make sure you use the VITE_ prefix for environment variables that need to be exposed to your Vite project. For example, in your mondayApi file, you should use:
-
-js
-Copy code
-const API_KEY = import.meta.env.VITE_API_KEY;
-const BOARD_ID = import.meta.env.VITE_BOARD_ID;
-This will correctly load your environment variables and make them accessible in your application code.
+Make sure you use the VITE_ prefix for environment variables that need to be exposed to your Vite project.
