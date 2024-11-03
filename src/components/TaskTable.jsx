@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Table, Button, Tag, Space } from 'antd';
+import React, { useState, useCallback, useMemo } from 'react';
+import { Tag, Space } from 'antd';
+import {Button, Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell, Label, TextField, Dropdown} from "monday-ui-react-core";
 import { CloseOutlined } from '@ant-design/icons';
-import { updateItem, deleteItem } from '../api/mondayApi.jsx'; 
+import AddItemForm from './AddItemForm.jsx';
 
-const TaskTable = ({ tasks, setTasks, labels }) => {
+const TaskTable = ({ tasks, setTasks, labels, labelsColors, selectedApi}) => {
   const [editTaskId, setEditTaskId] = useState(null);
   const [updatedTask, setUpdatedTask] = useState({
     name: '',
@@ -11,6 +12,8 @@ const TaskTable = ({ tasks, setTasks, labels }) => {
     dueDate: '',
     status: ''
   });
+  
+  const { updateItem, deleteItem } = selectedApi;
 
   const handleEditClick = (task) => {
     setEditTaskId(task.id);
@@ -22,15 +25,26 @@ const TaskTable = ({ tasks, setTasks, labels }) => {
     });
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setUpdatedTask(prev => ({ ...prev, [name]: value }));
+  const handleInputChange = (valueOrEvent, event) => {
+    let name, value;
+  
+    if (event) {
+      name = event.target.name;
+      value = valueOrEvent;
+    } else {
+      name = valueOrEvent.target.name;
+      value = valueOrEvent.target.value;
+    }
+  
+    setUpdatedTask(prev => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   const handleSaveClick = async () => {
     try {
       await updateItem(editTaskId, updatedTask);
-
       const updatedTasks = tasks.map((t) =>
         t.id === editTaskId ? { 
           ...t, 
@@ -69,94 +83,103 @@ const TaskTable = ({ tasks, setTasks, labels }) => {
   };
 
   const getTagColor = (status) => {
-    switch (status) {
-      case 'Not Started':
-        return 'default';
-      case 'In Progress':
-        return 'blue';
-      case 'Completed':
-        return 'green';
-      case 'On Hold':
-        return 'orange';
-      default:
-        return 'default';
-    }
+    const labelObject = labelsColors.find(label => label.label === status);
+    return labelObject ? labelObject.color.color : 'default'; 
   };
+
+  const getStatusStyle = (label) => {
+    const colorObject = labelsColors.find(option => option.label === label);
+    return {
+      backgroundColor: colorObject?.color?.color || "default",
+      color: "#fff",
+      padding: "4px 8px",
+      borderRadius: "4px",
+    };
+  };
+
 
   const columns = [
     {
+      id: 'name',
       title: 'Name',
-      dataIndex: 'name',
-      key: 'name',
-      render: (text, record) =>
+      loadingStateType: 'medium-text',
+      render: (record) =>
         editTaskId === record.id ? (
-          <input
+          <TextField
             type="text"
             name="name"
             value={updatedTask.name}
             onChange={handleInputChange}
           />
         ) : (
-          text
+          record.name
         ),
     },
     {
+      id: 'description',
       title: 'Description',
-      dataIndex: 'text',
-      key: 'description',
-      render: (text, record) =>
+      loadingStateType: 'long-text',
+      render: (record) =>
         editTaskId === record.id ? (
-          <input
+          <TextField
             type="text"
             name="description"
             value={updatedTask.description}
             onChange={handleInputChange}
           />
         ) : (
-          text
+          record.text
         ),
     },
     {
+      id: 'dueDate',
       title: 'Due Date',
-      dataIndex: 'date',
-      key: 'due_date',
-      render: (text, record) =>
+      loadingStateType: 'medium-text',
+      render: (record) =>
         editTaskId === record.id ? (
-          <input
+          <TextField
             type="date"
             name="dueDate"
             value={updatedTask.dueDate}
             onChange={handleInputChange}
           />
         ) : (
-          text
+          record.date
         ),
     },
     {
+      id: 'status',
       title: 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (status, record) =>
+      loadingStateType: 'medium-text',
+      render: (record) =>
         editTaskId === record.id ? (
           <select
-            name="status"
-            value={updatedTask.status}
-            onChange={handleInputChange}
-          >
-            {labels.map((label) => (
-              <option key={label} value={label}>
-                {label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <Tag color={getTagColor(status)}>{status}</Tag>
-        ),
-    },
+          name="status"
+          value={updatedTask.status}
+          onChange={handleInputChange}
+          style={getStatusStyle(updatedTask.status)}
+        >
+          {labelsColors.map((option, index) => (
+            <option
+              key={`${option.label}-${index}`} 
+              value={option.label}
+              style={getStatusStyle(option.label)}
+            >
+              {option.label || 'No Status'} 
+            </option>
+          ))}
+        </select>
+      ) : (
+        <Tag color={getTagColor(record.status || '')}>
+          {record.status || 'No Status'}
+        </Tag>  ),
+      },
+      
     {
+      id: 'actions',
       title: 'Actions',
-      key: 'actions',
-      render: (_, record) =>
+      loadingStateType: 'medium-text',
+      render: (record) =>
         editTaskId === record.id ? (
         <Space size="middle">
           <Button onClick={handleSaveClick}>Save</Button>
@@ -176,8 +199,23 @@ const TaskTable = ({ tasks, setTasks, labels }) => {
       dataSource={tasks}
       columns={columns}
       rowKey="id"
-      pagination={false}
-    />
+      pagination={false}>
+      <TableHeader>
+        {columns.map((column) => (
+          <TableHeaderCell key={column.id} title={column.title} />
+        ))}
+      </TableHeader>
+      <TableBody>
+        {tasks.map((task) => (
+          <TableRow key={task.id}>
+            {columns.map((column) => (
+              <TableCell key={column.id}>{column.render(task)}</TableCell>
+            ))}
+          </TableRow>
+        ))}
+        <AddItemForm labels={labelsColors} setTasks={setTasks} selectedApi={selectedApi}/>
+      </TableBody>
+      </Table>
   );
 };
 

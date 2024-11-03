@@ -1,28 +1,50 @@
-import { useState, useEffect } from "react";
-import { Button, DatePicker, Space, Typography } from 'antd';
-import { fetchBoardItems, fetchStatusLabels, filterBoardItemsByDate } from './api/mondayApi.jsx';
+import { useState, useEffect, useRef } from "react";
+import { Select, DatePicker } from 'antd';
+import { TextField, Button, Heading } from "monday-ui-react-core";
 import TaskTable from './components/TaskTable.jsx';
-import AddItemForm from './components/AddItemForm.jsx';
+import * as mondayApi from './api/mondayApi.jsx';
+import * as fastApi from './api/fastApi.jsx';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from '@tanstack/react-query'
 
-const { Title } = Typography;
+
+const { Option } = Select;
+const queryClient = new QueryClient()
 
 function App() {
   const [tasks, setTasks] = useState([])
   const [labels, setLabels] = useState([]);
+  const [labelsColors, setLabelsColors] = useState([]); 
   const [boardName, setBoardName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterDate, setFilterDate] = useState('');
   const [filterApplied, setFilterApplied] = useState(false);
+  const [selectedApi, setSelectedApi] = useState("monday");
+
+  const columnMapCacheRef = useRef({});
+
+  const apiMap = {
+    monday: mondayApi,
+    fastApi: fastApi
+  };
 
   useEffect(() => {
+    const { fetchBoardItems, fetchStatusLabels } = apiMap[selectedApi];
     const getItems = async () => {
       try {
-        const { boardName, orderedItems } = await fetchBoardItems();
+        const { boardName, orderedItems, columnMapCache } = await fetchBoardItems();
         setBoardName(boardName);
         setTasks(orderedItems);
-        const labels = await fetchStatusLabels();
-        setLabels(labels);
+        columnMapCacheRef.current = columnMapCache || {};
+        const labelsColors_ = await fetchStatusLabels();
+        const labels_ = labelsColors_.map(item => item.label);
+        
+        setLabels(labels_);
+        setLabelsColors(labelsColors_);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -30,33 +52,22 @@ function App() {
       }
     };
     getItems();
-  }, []);
+  }, [selectedApi]);
+
   const handleFilterToggle = async () => {
+    const { fetchBoardItems, filterBoardItemsByDate } = apiMap[selectedApi];
     try {
       if (filterApplied) {
-        const {orderedItems} = await fetchBoardItems();
+        const {orderedItems, columnMapCache} = await fetchBoardItems();
         setTasks(orderedItems);
+        columnMapCacheRef.current = columnMapCache || {};
         setFilterDate(null);
         setFilterApplied(false);
       } else {
         if (filterDate) {
           const formattedDate = filterDate.format('YYYY-MM-DD');
           const filteredTasks = await filterBoardItemsByDate(formattedDate);
-          
-          const mappedTasks = filteredTasks.map(task => {
-            const text = task.column_values.find(col => col.id === 'text__1')?.text || '';
-            const date = task.column_values.find(col => col.id === 'date4')?.text || '';
-            const status = task.column_values.find(col => col.id === 'status')?.text || '';
-            return {
-              id: task.id,
-              name: task.name,
-              text: text,
-              date: date,
-              status: status
-            };
-          });
-
-          setTasks(mappedTasks); 
+          setTasks(filteredTasks); 
           setFilterApplied(true);
         }
       }
@@ -65,31 +76,40 @@ function App() {
     }
   };
 
-
   if (loading) return <p>Loading...</p>;
   if (error) return <p>Error: {error}</p>;
 
 
   return (
-    <div className="App">
-       <Title level={1}>{boardName || "Loading Board Name..."}</Title>
-       <div>
-          <DatePicker
-            format="YYYY-MM-DD"
-            onChange={(date) => setFilterDate(date)}
-            value={filterDate}
-          />
-          <Button
-            type={filterApplied ? "default" : "primary"}
-            onClick={handleFilterToggle}
-            style={{ marginLeft: '10px' }}
+    <QueryClientProvider client={queryClient}>
+      <div className="App">
+        <Heading type={Heading.types.H1} >{boardName || "Loading Board Name..."}</Heading>
+        <Select
+            defaultValue="monday"
+            onChange={(value) => setSelectedApi(value)}
+            style={{ marginBottom: "20px" }}
           >
-            {filterApplied ? 'Reset Filter' : 'Filter by Date'}
-          </Button>
-        </div>
-       <TaskTable tasks={tasks} setTasks={setTasks} labels={labels}/>
-       <AddItemForm labels={labels} setTasks={setTasks} />
-    </div>
+            <Option value="monday">Monday API</Option>
+            <Option value="fastApi">FastAPI</Option>
+          </Select>
+
+        <div>
+            <DatePicker
+              format="YYYY-MM-DD"
+              onChange={(date) => setFilterDate(date)}
+              value={filterDate}
+            />
+            <Button
+              type={filterApplied ? "default" : "primary"}
+              onClick={handleFilterToggle}
+              style={{ marginLeft: '10px' }}
+            >
+              {filterApplied ? 'Reset Filter' : 'Filter by Date'}
+            </Button>
+          </div>
+        <TaskTable tasks={tasks} setTasks={setTasks} labels={labels} labelsColors={labelsColors} selectedApi={apiMap[selectedApi]} />
+      </div>
+    </QueryClientProvider>
   )
 }
 

@@ -2,10 +2,38 @@ const API_URL = 'https://api.monday.com/v2';
 const API_KEY = import.meta.env.VITE_API_KEY;
 const BOARD_ID = import.meta.env.VITE_BOARD_ID;
 
-// Function to fetch board items
+let columnMapCache = null;
+
+const formatTaskFields = (item) => {
+  const text = item.column_values.find(col => col.id === columnMapCache['description'])?.text || '';
+  const date = item.column_values.find(col => col.id === columnMapCache['date'])?.text || '';
+  const status = item.column_values.find(col => col.id === columnMapCache['status'])?.text || '';
+
+  return {
+    id: item.id,
+    name: item.name,
+    text,
+    date,
+    status,
+  };
+};
+
 export const fetchBoardItems = async () => {
-    const query =  `{boards(ids: ${BOARD_ID}) { name id description items_page { items { id name column_values{id type text } } } } }`;
-  
+    const query =  ` query ($boardId: ID!) {
+      boards(ids: [$boardId]) {
+        name id  
+        columns { id title }
+        items_page { 
+          items { 
+            id name 
+            column_values{ id text } 
+          } 
+        } 
+      }
+    }`;
+    const variables = {
+      boardId: BOARD_ID, 
+    };
     try {
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -14,7 +42,7 @@ export const fetchBoardItems = async () => {
           'Authorization': `Bearer ${API_KEY}`,
           'API-Version': '2023-04',
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, variables }),
       });
   
       if (!response.ok) {
@@ -23,23 +51,18 @@ export const fetchBoardItems = async () => {
   
       const data = await response.json();
       const boardName = data.data.boards[0].name;
+      const columns = data.data.boards[0].columns;
       const items = data.data.boards[0].items_page.items;
       
-      const orderedItems = items.map(item => {
-        const text = item.column_values.find(col => col.id === 'text__1')?.text || '';
-        const date = item.column_values.find(col => col.id === 'date4')?.text || '';
-        const status = item.column_values.find(col => col.id === 'status')?.text || '';
+      if (!columnMapCache) {
+        columnMapCache = {};
+        columns.forEach(col => {
+          columnMapCache[col.title.toLowerCase()] = col.id;
+        });
+      }
       
-        return {
-          name: item.name,
-          id : item.id,
-          text: text,
-          date: date,
-          status: status,
-        };
-      });
-      
-      return { boardName, orderedItems };
+      const orderedItems = items.map(task => formatTaskFields(task));
+      return { boardName, orderedItems, columnMapCache };
   
     } catch (error) {
       console.error('Error fetching board items:', error);
@@ -48,16 +71,20 @@ export const fetchBoardItems = async () => {
   };
 
 export const createBoardItem = async ({ name, text, date, status }) => {
-  console.log(name, text, date, status)
-  const query = `mutation ($myItemName: String!, $columnVals: JSON!) 
-  { create_item (board_id:${BOARD_ID}, item_name:$myItemName, column_values:$columnVals) { id } }`;
-  const vars = {
-    "myItemName" : name,
+  if (!columnMapCache) await fetchBoardItems();
+  const query = `mutation ($boardId: ID!, $myItemName: String!, $columnVals: JSON!) 
+  { create_item (board_id:$boardId, item_name:$myItemName, column_values:$columnVals) { id } }`;
+
+  const variables = {
+    "boardId": BOARD_ID,
+    "myItemName": name,
     "columnVals" : JSON.stringify({
-      "text__1": text,
-      "status" : status,
-      "date4" : date
+      [columnMapCache['description']]: text,
+      [columnMapCache['status']]: status,
+      [columnMapCache['date']]: date
+       
     })
+    
   };
   try {
     const response = await fetch("https://api.monday.com/v2", {
@@ -67,10 +94,7 @@ export const createBoardItem = async ({ name, text, date, status }) => {
             'Authorization' : `Bearer ${API_KEY}`,
 
     },
-    body: JSON.stringify({
-      'query' : query,
-      'variables' : JSON.stringify(vars)
-    })
+    body: JSON.stringify({ query, variables })
   })
   if (!response.ok) {
     throw new Error('Network response was not ok');
@@ -78,7 +102,7 @@ export const createBoardItem = async ({ name, text, date, status }) => {
 
   const result = await response.json();
   console.log(JSON.stringify(result, null, 2));
-  return result.data.create_item.id; // Return the newly created item ID
+  return result.data.create_item.id; 
   } catch (error) {
       console.error('Error creating board item:', error);
       throw error;
@@ -86,8 +110,17 @@ export const createBoardItem = async ({ name, text, date, status }) => {
 }
 
 export const fetchStatusLabels = async() => {
-  const query = `query {
-    boards(ids: ${BOARD_ID}) { 
+  if (!columnMapCache) {
+    await fetchBoardItems();  
+  }
+
+  const statusColumnId = columnMapCache?.['status'];
+  if (!statusColumnId) {
+    console.error('Status column not found in columnMapCache.');
+    return [];
+  }
+  const query = `query ($boardId: ID!) {
+    boards(ids: [$boardId]) {
       columns {
         id
         title
@@ -95,6 +128,8 @@ export const fetchStatusLabels = async() => {
       }
     }
   }`
+
+  const variables = { boardId: BOARD_ID};
   try {
     const response = await fetch("https://api.monday.com/v2", {
       method: "POST",
@@ -104,6 +139,7 @@ export const fetchStatusLabels = async() => {
       },
       body: JSON.stringify({
         query,
+        variables
       }),
     });
 
@@ -112,11 +148,18 @@ export const fetchStatusLabels = async() => {
     }
 
     const data = await response.json();
-    const statusColumn = data.data.boards[0].columns.find(col => col.id === 'status');
+    const statusColumn = data.data.boards[0].columns.find(col => col.id === statusColumnId);
     if (statusColumn) {
       const settings = JSON.parse(statusColumn.settings_str);
       const labelsArray = Object.values(settings.labels);
-      return labelsArray || [];
+      const colorsArray = Object.values(settings.labels_colors); 
+
+      const labelsWithColors = labelsArray.map((label, index) => ({
+        label,
+        color: colorsArray[index] || 'default', 
+      }));
+      console.log(labelsWithColors)
+      return labelsWithColors;
     }
     return [];
   } catch (error) {
@@ -126,21 +169,18 @@ export const fetchStatusLabels = async() => {
 };
 
 export const updateItem = async (itemId, columnVals) => {
-  console.log(JSON.stringify({
-    text__1: columnVals.description, 
-    date4: columnVals.dueDate,       
-    status: { label: columnVals.status }
-  }))
   const query = `
-    mutation ($itemId: ID!, $columnValues: JSON!) {
-      change_multiple_column_values( item_id: $itemId, board_id:${BOARD_ID} , column_values: $columnValues) { id }} `;
+    mutation ($boardId: ID!, $itemId: ID!, $columnVals: JSON!) {
+      change_multiple_column_values( item_id: $itemId, board_id:$boardId , column_values: $columnVals) { id }
+    } `;
   const vars = {
     itemId: itemId,
     boardId: BOARD_ID,
-    columnValues: JSON.stringify({
-      text__1: columnVals.description, 
-      date4: columnVals.dueDate,       
-      status: { label: columnVals.status }
+    "columnVals" : JSON.stringify({
+      name: columnVals.name,
+      [columnMapCache['description']]: columnVals.description,
+      [columnMapCache['status']]: { label: columnVals.status },
+      [columnMapCache['date']]: columnVals.dueDate,
     })
   }
 
@@ -176,12 +216,14 @@ export const updateItem = async (itemId, columnVals) => {
 
 export const deleteItem = async (itemId) => {
   const query = `
-    mutation {
-      delete_item(item_id: ${itemId}) {
+    mutation ( $itemId: ID!){
+      delete_item( item_id: $itemId) {
         id
       }
     }`;
-
+  const variables = {
+    "itemId": itemId, 
+  };
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -189,7 +231,7 @@ export const deleteItem = async (itemId) => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${API_KEY}`
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, variables }),
     });
 
     if (!response.ok) {
@@ -198,7 +240,6 @@ export const deleteItem = async (itemId) => {
 
     const data = await response.json();
 
-    // Check for errors in the response
     if (data.errors) {
       throw new Error(`Error deleting item: ${data.errors[0].message}`);
     }
@@ -213,11 +254,11 @@ export const deleteItem = async (itemId) => {
 
 export const filterBoardItemsByDate = async (date) => {
   const query = `
-    {
+    query ($boardId: ID!, $columnId:String! ,$date: String!) {
       items_page_by_column_values(
         limit: 50, 
-        board_id: ${BOARD_ID}, 
-        columns: [{ column_id: "date4", column_values: ["${date}"] }]
+        board_id: $boardId,
+        columns: [{ column_id: $columnId, column_values: [$date] }]
       ) {
         cursor
         items {
@@ -231,7 +272,11 @@ export const filterBoardItemsByDate = async (date) => {
       }
     }
   `;
-
+  const variables = {
+    boardId: BOARD_ID, 
+    columnId: columnMapCache['date'],
+    date,    
+  };
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -240,7 +285,7 @@ export const filterBoardItemsByDate = async (date) => {
         'Authorization': `Bearer ${API_KEY}`,
         'API-Version': '2023-04',
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, variables }),
     });
 
     if (!response.ok) {
@@ -249,13 +294,15 @@ export const filterBoardItemsByDate = async (date) => {
 
     const result = await response.json();
 
-    // Ensure the response has the correct structure
     const itemsPage = result.data?.items_page_by_column_values;
+    
     if (!itemsPage || itemsPage.items.length === 0) {
       throw new Error('No items found');
     }
+    const filteredItems = itemsPage.items.map(formatTaskFields);
+    console.log(filteredItems)
+    return filteredItems;
 
-    return itemsPage.items;
   } catch (error) {
     console.error('Error filtering board items by date:', error);
     throw error;

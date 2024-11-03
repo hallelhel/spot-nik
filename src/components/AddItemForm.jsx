@@ -1,19 +1,18 @@
 import { useState, useEffect  } from 'react';
-import { createBoardItem } from '../api/mondayApi.jsx';
-import { Button, Input , Form, Select} from 'antd';
-const { Option } = Select;
+import { Button, TextField, Dropdown, TableRow, TableCell, Table } from "monday-ui-react-core";
+import Label from "monday-ui-react-core/dist/Label"; 
 
-function AddItemForm({ labels, setTasks }) {
+function AddItemForm({ labels, setTasks, selectedApi }) {
   const [name, setName] = useState('');
   const [text, setDescription] = useState('');
   const [date, setDate] = useState('');
   const [status, setStatus] = useState(labels[0] || '');
   const [isButtonDisabled, setIsButtonDisabled] = useState(true);
+  const { createBoardItem } = selectedApi;
 
   useEffect(() => {
     setIsButtonDisabled(name.trim() === '');
   }, [name]);
-  
   const handleSubmit = async (e) => {
     const newItem = {
       name: name, 
@@ -23,7 +22,6 @@ function AddItemForm({ labels, setTasks }) {
     }
     try {
       const id = await createBoardItem (newItem);
-      console.log(newItem.text)
       setTasks(prevTasks => [
         ...prevTasks, 
         { 
@@ -44,52 +42,58 @@ function AddItemForm({ labels, setTasks }) {
     }
   };
   return (
-    <Form layout="inline" onFinish={handleSubmit} initialValues={{ name, text, date, status }}>
-      <Form.Item >
-        <Input
+    <TableRow>
+      <TableCell>
+        <TextField
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={setName}
           placeholder="Name"
-          />
-      </Form.Item>
-     
-      <Form.Item>
-        <Input
+        />
+      </TableCell>
+  
+      <TableCell>
+        <TextField
           value={text}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={setDescription}
           placeholder="Description"
         />
-      </Form.Item>
+      </TableCell>
 
-      <Form.Item>
-        <Input
+      <TableCell>
+        <TextField
           type="date"
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={setDate}
         />
-      </Form.Item>
+      </TableCell>
 
-      <Form.Item>
-        <Select
+      <TableCell>     
+        <select
+          name="status"
           value={status}
-          onChange={(value) => setStatus(value)}
-          placeholder="Select Status"
+          onChange={(e) => setStatus(e.target.value)}
         >
-          {labels.map((label) => (
-            <Option key={label} value={label}>
-              {label}
-            </Option>
+          {labels.map((option, index) => (
+            <option
+              key={`${option.label}-${index}`} 
+              value={option.label}
+            >
+              {option.label || 'No Status'} 
+            </option>
           ))}
-        </Select>
-      </Form.Item>
+        </select>
+      </TableCell>
 
-      <Form.Item>
-        <Button type="primary" htmlType="submit" disabled={isButtonDisabled}>
+      <TableCell>
+        <Button 
+          kind="primary" 
+          onClick={handleSubmit} 
+          disabled={isButtonDisabled}
+        >
           Add Task
         </Button>
-      </Form.Item>
-    </Form>
-
+      </TableCell>
+    </TableRow>
   );
 }
 
